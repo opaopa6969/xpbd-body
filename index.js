@@ -13,6 +13,15 @@
 // becomes the motor target → the body physically TRACKS it but has real mass,
 // gravity, momentum and reacts to pushes). Isotropic inertia (sphere approx);
 // real inertia tensors + contacts are M2/M3.
+//
+// M3 scope: CONTACTS as one-sided positional constraints (same XPBD frame as the
+// joints, so they re-iterate together and stay stable under stiff motors):
+//   GroundContact   keep a body above a horizontal plane (卓=面: the table top).
+//   BoxContact      keep a body out of an axis-aligned box (牌=小箱, 卓縁).
+//   Contact         sphere↔sphere push-apart — the body's own SELF-COLLISION
+//                   ("肉で腕が回り込む"): limbs ride AROUND the torso, they don't
+//                   pass through it. A BodyProfile `bulk` inflates the torso
+//                   colliders → a heavier build's arms swing wider around the belly.
 
 // ----- vec3 / quat (plain arrays) -----
 export const v3 = {
@@ -44,12 +53,13 @@ export const q4 = {
 
 // ----- rigid body -----
 export class Body {
-  constructor({ pos = [0, 0, 0], q = [0, 0, 0, 1], mass = 1, radius = 0.06, fixed = false } = {}) {
+  constructor({ pos = [0, 0, 0], q = [0, 0, 0, 1], mass = 1, radius = 0.06, cr = null, fixed = false } = {}) {
     this.p = pos.slice(); this.q = q.slice();
     this.v = [0, 0, 0]; this.w = [0, 0, 0];
     this.invM = fixed ? 0 : 1 / mass;
     // isotropic inertia of a solid sphere I = 2/5 m r^2
     this.invI = fixed ? 0 : 1 / (0.4 * mass * radius * radius);
+    this.cr = cr != null ? cr : radius;   // collision radius (M3 contacts); defaults to the physics radius
     this.pp = this.p.slice(); this.pq = this.q.slice();
   }
   worldPoint(r) { return v3.add(this.p, q4.rot(this.q, r)); }
@@ -107,6 +117,76 @@ export function Motor(A, B, rest, compliance = 0.0005) {
   };
 }
 
+// ----- contacts (M3) -----
+// One-sided positional constraints: they do NOTHING until a body penetrates, then
+// project it out along the contact normal. Positional-only (no torque) — a body
+// is treated as a sphere of radius `b.cr` about its COM, which is all the upper
+// body needs to keep limbs out of the torso and off the table.
+
+// keep sphere `B` (radius B.cr) above the horizontal plane y = `y`. compliance 0
+// = rigid floor. This is the table top / 卓面.
+export function GroundContact(B, { y = 0, compliance = 0 } = {}) {
+  return {
+    contact: true,
+    solve(h) {
+      if (B.invM === 0) return;
+      const pen = (y + B.cr) - B.p[1];          // >0 → below the surface
+      if (pen <= 0) return;
+      const at = compliance / (h * h);
+      B.p[1] += pen / (1 + at);                  // invM cancels (single free body)
+    },
+  };
+}
+
+// keep sphere `B` out of the axis-aligned box [min,max] (grown by B.cr): the tile
+// box / table-edge box. Pushes out along the least-penetrating axis (the face the
+// body is closest to escaping through) — the standard AABB pop-out.
+export function BoxContact(B, min, max, { compliance = 0 } = {}) {
+  return {
+    contact: true,
+    solve(h) {
+      if (B.invM === 0) return;
+      const r = B.cr;
+      const lo = [min[0] - r, min[1] - r, min[2] - r];
+      const hi = [max[0] + r, max[1] + r, max[2] + r];
+      for (let i = 0; i < 3; i++) if (B.p[i] <= lo[i] || B.p[i] >= hi[i]) return;   // outside → no contact
+      let axis = 0, depth = Infinity, dir = 1;
+      for (let i = 0; i < 3; i++) {
+        const dLo = B.p[i] - lo[i], dHi = hi[i] - B.p[i];
+        if (dLo < depth) { depth = dLo; axis = i; dir = -1; }
+        if (dHi < depth) { depth = dHi; axis = i; dir = 1; }
+      }
+      const at = compliance / (h * h);
+      B.p[axis] += (dir * depth) / (1 + at);
+    },
+  };
+}
+
+// sphere↔sphere push-apart: keep COMs at least (A.cr + B.cr) apart. This is the
+// SELF-COLLISION primitive — register it between a limb body and a torso body and
+// the limb can no longer pass through the trunk; under a stiff reach it slides
+// AROUND instead. Split by inverse mass so a fixed/heavy part barely moves.
+export function Contact(A, B, { compliance = 0 } = {}) {
+  return {
+    contact: true,
+    solve(h) {
+      const wsum = A.invM + B.invM;
+      if (wsum === 0) return;
+      const d = v3.sub(A.p, B.p);
+      const dist = v3.len(d);
+      const dMin = A.cr + B.cr;
+      if (dist >= dMin || dist < 1e-9) return;  // not overlapping
+      const n = v3.scale(d, 1 / dist);
+      const C = dMin - dist;                     // penetration depth (>0)
+      const at = compliance / (h * h);
+      const dl = C / (wsum + at);
+      const P = v3.scale(n, dl);
+      A.p = v3.add(A.p, v3.scale(P, A.invM));
+      B.p = v3.sub(B.p, v3.scale(P, B.invM));
+    },
+  };
+}
+
 // ----- world -----
 export class World {
   constructor({ gravity = [0, -9.81, 0], linDamp = 0.999, angDamp = 0.985 } = {}) {
@@ -129,10 +209,12 @@ export class World {
         b.q = q4.norm([b.q[0] + 0.5 * h * dq[0], b.q[1] + 0.5 * h * dq[1], b.q[2] + 0.5 * h * dq[2], b.q[3] + 0.5 * h * dq[3]]);
       }
       for (const c of this.constraints) c.solve(h);
-      // extra Gauss-Seidel passes over the JOINTS only (not motors): a chain
-      // needs iteration to satisfy all attachments at once, and we don't want to
-      // over-stiffen the muscles by re-solving them too.
-      for (let k = 0; k < 3; k++) for (const c of this.constraints) if (c.joint) c.solve(h);
+      // extra Gauss-Seidel passes over the JOINTS + CONTACTS (not motors): a chain
+      // needs iteration to satisfy all attachments at once, and contacts must be
+      // re-resolved after the joints pull bodies back (or a limb the joint just
+      // moved would be left penetrating the torso). Motors are left out so we
+      // don't over-stiffen the muscles by re-solving them.
+      for (let k = 0; k < 3; k++) for (const c of this.constraints) if (c.joint || c.contact) c.solve(h);
       for (const b of this.bodies) {
         if (b.invM === 0) continue;
         b.v = v3.scale(v3.scale(v3.sub(b.p, b.pp), 1 / h), this.linDamp);
@@ -195,27 +277,58 @@ export const UPPER_BODY = Object.freeze([
   { name: 'rightHand', parent: 'rightLowerArm', off: [0, -0.24, 0] },
 ]);
 
+// BodyProfile (M3): per-avatar physical character. `mass` scales every bone's
+// mass (heavier = sags more under the same muscle); `bulk` inflates the torso
+// colliders (a wider build to ride limbs around); `selfCollision` opts the trunk
+// vs forearm/hand contacts in. Defaults reproduce the M2 body exactly.
+export const DEFAULT_PROFILE = Object.freeze({ mass: 1.0, bulk: 0, selfCollision: false });
+
+// per-bone collision radii (m, about the COM). The trunk bones are fat targets
+// limbs must go around; arms are thin. `bulk` adds to the trunk only.
+const COLLIDER_R = Object.freeze({
+  hips: 0.13, spine: 0.12, chest: 0.13, neck: 0.05, head: 0.10,
+  leftShoulder: 0.05, rightShoulder: 0.05,
+  leftUpperArm: 0.05, rightUpperArm: 0.05,
+  leftLowerArm: 0.045, rightLowerArm: 0.045, leftHand: 0.05, rightHand: 0.05,
+});
+const TRUNK = Object.freeze(['hips', 'spine', 'chest']);
+
 /**
  * Build a pelvis-anchored active-ragdoll upper body. Each bone is a rigid body
  * jointed to its parent (Attach) and driven by a compliant Motor toward a target
  * orientation. Feed a motion-engine pose via setPose() each frame; step the world;
  * read bodies[name].q for the physical result (relative-to-parent = the bone's
  * local rotation the renderer applies).
+ *
+ * `profile` (BodyProfile) gives the body physical character — mass / bulk /
+ * self-collision (see DEFAULT_PROFILE). Omit it and the body is identical to M2.
  */
-export function makeUpperBody(world, { skeleton = UPPER_BODY, mass = 1.0, compliance = 0.0008 } = {}) {
+export function makeUpperBody(world, { skeleton = UPPER_BODY, mass = 1.0, compliance = 0.0008, profile = null } = {}) {
+  const prof = Object.assign({}, DEFAULT_PROFILE, profile);
+  const bulk = prof.bulk || 0;
   const bodies = {}, motors = {}, worldPos = {}, parentOf = {};
   for (const b of skeleton) {
     const base = b.parent ? worldPos[b.parent] : [0, 0, 0];
     worldPos[b.name] = v3.add(base, b.off);
-    const body = world.add(new Body({ pos: worldPos[b.name], mass: b.fixed ? 1 : mass, fixed: !!b.fixed }));
+    let cr = COLLIDER_R[b.name] != null ? COLLIDER_R[b.name] : 0.04;
+    if (TRUNK.includes(b.name)) cr += bulk * 0.08;      // a heavier build → a wider trunk
+    const body = world.add(new Body({ pos: worldPos[b.name], mass: b.fixed ? 1 : mass * prof.mass, fixed: !!b.fixed, cr }));
     bodies[b.name] = body; parentOf[b.name] = b.parent;
     if (b.parent) {
       motors[b.name] = world.constrain(Motor(bodies[b.parent], body, [0, 0, 0, 1], compliance));
       world.constrain(Attach(bodies[b.parent], b.off, body, [0, 0, 0]));
     }
   }
+  // self-collision: forearms + hands ride AROUND the trunk, not through it. Opt-in
+  // via the profile so the default body stays byte-for-byte the M2 body.
+  if (prof.selfCollision) {
+    const limbs = ['leftLowerArm', 'leftHand', 'rightLowerArm', 'rightHand'];
+    for (const t of TRUNK) for (const l of limbs) {
+      if (bodies[l] && bodies[t]) world.constrain(Contact(bodies[l], bodies[t]));
+    }
+  }
   return {
-    bodies, parentOf,
+    bodies, parentOf, profile: prof,
     setPose(poseEuler) {
       for (const b of skeleton) {
         if (!b.parent || !motors[b.name]) continue;
