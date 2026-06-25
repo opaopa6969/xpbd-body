@@ -1,10 +1,12 @@
 // xpbd M1 tests — proves the active ragdoll: real gravity/mass, tracks a target
 // pose (the "muscle"), stays connected, reacts to a push, and is deterministic.
 //   node test.mjs
-import { World, makeArm, q4, v3 } from './index.js';
+import { World, makeArm, makeUpperBody, qFromEulerXYZ, UPPER_BODY, q4, v3 } from './index.js';
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.error('  ✗ ' + m); } };
+// shortest angle between two unit quats (radians)
+const qAngle = (a, b) => { const d = Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]); return 2 * Math.acos(Math.min(1, d)); };
 
 const upperDirY = (arm) => q4.rot(arm.upper.q, [0, -1, 0])[1];   // -1 = straight down, →0 = lifted to horizontal
 const LIFT = q4.axisAngle([0, 0, 1], 1.3);                       // raise the upper arm toward horizontal
@@ -79,5 +81,70 @@ function simulate({ compliance = 0.00003, mass = 1.2, target = LIFT, frames = 20
   ok(same, 'simulation is deterministic across runs');
 }
 
-console.log(`xpbd M1: ${pass} passed, ${fail} failed`);
+// ===== M2: full upper-body chain driven by a motion-engine pose =====
+const offOf = {}; for (const b of UPPER_BODY) offOf[b.name] = b;
+function simBody({ pose = {}, compliance = 0.00006, frames = 300, kick = null } = {}) {
+  const world = new World();
+  const ub = makeUpperBody(world, { compliance });
+  const dt = 1 / 60; let maxGap = 0, finite = true; const trace = [];
+  for (let i = 0; i < frames; i++) {
+    ub.setPose(pose);
+    if (kick && i === kick.at) ub.bodies[kick.bone].v = v3.add(ub.bodies[kick.bone].v, kick.v);
+    world.step(dt);
+    for (const b of UPPER_BODY) {
+      if (!b.parent) continue;
+      const jp = v3.add(ub.bodies[b.parent].p, q4.rot(ub.bodies[b.parent].q, b.off));
+      maxGap = Math.max(maxGap, v3.len(v3.sub(jp, ub.bodies[b.name].p)));
+    }
+    if (!ub.bodies.head.p.every(Number.isFinite)) finite = false;
+    trace.push({ head: ub.bodies.head.q.slice(), chest: ub.bodies.chest.q.slice(), rua: ub.bodies.rightUpperArm.q.slice(), rh: ub.bodies.rightHand.p.slice() });
+  }
+  return { ub, maxGap, finite, trace };
+}
+// relative orientation child-in-parent (the bone's local rotation)
+const relOf = (ub, name) => q4.mul(q4.conj(ub.bodies[offOf[name].parent].q), ub.bodies[name].q);
+
+// 8) the whole chain TRACKS a motion-engine pose (relative orientations match)
+{
+  const POSE = { rightUpperArm: [0, 0, -1.0], head: [0.2, 0.3, 0], chest: [0, 0.2, 0] };
+  const { ub, finite } = simBody({ pose: POSE, compliance: 0.00004, frames: 320 });
+  let maxErr = 0;
+  for (const name in POSE) maxErr = Math.max(maxErr, qAngle(relOf(ub, name), qFromEulerXYZ(POSE[name])));
+  ok(finite, 'upper-body chain stays finite');
+  ok(maxErr < 0.2, 'chain tracks the motion-engine pose (maxErr=' + maxErr.toFixed(3) + ' rad)');
+}
+
+// 9) every joint in the chain stays connected
+{
+  const r = simBody({ pose: { rightUpperArm: [0, 0, -1.0] }, frames: 320 });
+  ok(r.maxGap < 0.012, 'all upper-body joints stay connected (maxGap=' + r.maxGap.toFixed(5) + ' m)');
+}
+
+// 10) a shove on the head PROPAGATES down the chain, then recovers
+{
+  const r = simBody({ pose: {}, compliance: 0.003, frames: 360, kick: { at: 150, bone: 'head', v: [0, 0, 18] } });
+  const chestBase = r.trace[148].chest;
+  let peak = 0; for (let i = 151; i < 185; i++) peak = Math.max(peak, qAngle(chestBase, r.trace[i].chest));
+  const headBase = r.trace[148].head, headEnd = r.trace[359].head;
+  ok(peak > 0.02, 'the shove propagates down to the chest (peak Δ=' + peak.toFixed(3) + ')');
+  ok(qAngle(headBase, headEnd) < 0.06, 'the chain recovers to the pose after the shove');
+}
+
+// 11) a WEAK muscle lets a raised arm sag under gravity (held pose vs strong)
+{
+  const POSE = { rightUpperArm: [0, 0, -1.3] };          // hold the right arm out/up
+  const strong = simBody({ pose: POSE, compliance: 0.00006, frames: 280 }).trace[279].rh[1];
+  const weak = simBody({ pose: POSE, compliance: 0.01, frames: 280 }).trace[279].rh[1];
+  ok(Math.abs(strong - weak) > 0.05, 'muscle strength changes where the held arm ends up (strong y=' + strong.toFixed(3) + ', weak y=' + weak.toFixed(3) + ')');
+}
+
+// 12) the upper-body chain is deterministic
+{
+  const a = simBody({ pose: { head: [0.2, 0, 0] }, kick: { at: 60, bone: 'chest', v: [0, 0, 5] } }).trace.map((t) => t.rh);
+  const b = simBody({ pose: { head: [0.2, 0, 0] }, kick: { at: 60, bone: 'chest', v: [0, 0, 5] } }).trace.map((t) => t.rh);
+  let same = true; for (let i = 0; i < a.length; i++) for (let k = 0; k < 3; k++) if (a[i][k] !== b[i][k]) same = false;
+  ok(same, 'upper-body chain is deterministic');
+}
+
+console.log(`xpbd M1+M2: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

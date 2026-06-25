@@ -166,3 +166,62 @@ export function makeArm(world, { shoulder = [0, 1.4, 0], Lupper = 0.26, Llower =
     handPos() { return lower.worldPoint([0, -Llower / 2, 0]); },
   };
 }
+
+// ----- M2: full pelvis-anchored upper-body chain -----
+// three.js 'XYZ' Euler → quat, so a motion-engine pose ({bone:[x,y,z]}) drops in
+// as the motor targets with no conversion surprises.
+export function qFromEulerXYZ(e) {
+  const c1 = Math.cos(e[0] / 2), c2 = Math.cos(e[1] / 2), c3 = Math.cos(e[2] / 2);
+  const s1 = Math.sin(e[0] / 2), s2 = Math.sin(e[1] / 2), s3 = Math.sin(e[2] / 2);
+  return [s1 * c2 * c3 + c1 * s2 * s3, c1 * s2 * c3 - s1 * c2 * s3, c1 * c2 * s3 + s1 * s2 * c3, c1 * c2 * c3 - s1 * s2 * s3];
+}
+
+// a default upper-body skeleton (bone → parent, rest offset from parent origin).
+// `off` is the child's joint position in the parent's local frame at rest. Real
+// integration measures these from the VRM; these are plausible defaults for tests.
+export const UPPER_BODY = Object.freeze([
+  { name: 'hips', parent: null, off: [0, 1.0, 0], fixed: true },
+  { name: 'spine', parent: 'hips', off: [0, 0.12, 0] },
+  { name: 'chest', parent: 'spine', off: [0, 0.14, 0] },
+  { name: 'neck', parent: 'chest', off: [0, 0.15, 0] },
+  { name: 'head', parent: 'neck', off: [0, 0.08, 0] },
+  { name: 'leftShoulder', parent: 'chest', off: [0.06, 0.10, 0] },
+  { name: 'leftUpperArm', parent: 'leftShoulder', off: [0.10, 0, 0] },
+  { name: 'leftLowerArm', parent: 'leftUpperArm', off: [0, -0.26, 0] },
+  { name: 'leftHand', parent: 'leftLowerArm', off: [0, -0.24, 0] },
+  { name: 'rightShoulder', parent: 'chest', off: [-0.06, 0.10, 0] },
+  { name: 'rightUpperArm', parent: 'rightShoulder', off: [-0.10, 0, 0] },
+  { name: 'rightLowerArm', parent: 'rightUpperArm', off: [0, -0.26, 0] },
+  { name: 'rightHand', parent: 'rightLowerArm', off: [0, -0.24, 0] },
+]);
+
+/**
+ * Build a pelvis-anchored active-ragdoll upper body. Each bone is a rigid body
+ * jointed to its parent (Attach) and driven by a compliant Motor toward a target
+ * orientation. Feed a motion-engine pose via setPose() each frame; step the world;
+ * read bodies[name].q for the physical result (relative-to-parent = the bone's
+ * local rotation the renderer applies).
+ */
+export function makeUpperBody(world, { skeleton = UPPER_BODY, mass = 1.0, compliance = 0.0008 } = {}) {
+  const bodies = {}, motors = {}, worldPos = {}, parentOf = {};
+  for (const b of skeleton) {
+    const base = b.parent ? worldPos[b.parent] : [0, 0, 0];
+    worldPos[b.name] = v3.add(base, b.off);
+    const body = world.add(new Body({ pos: worldPos[b.name], mass: b.fixed ? 1 : mass, fixed: !!b.fixed }));
+    bodies[b.name] = body; parentOf[b.name] = b.parent;
+    if (b.parent) {
+      motors[b.name] = world.constrain(Motor(bodies[b.parent], body, [0, 0, 0, 1], compliance));
+      world.constrain(Attach(bodies[b.parent], b.off, body, [0, 0, 0]));
+    }
+  }
+  return {
+    bodies, parentOf,
+    setPose(poseEuler) {
+      for (const b of skeleton) {
+        if (!b.parent || !motors[b.name]) continue;
+        const e = poseEuler && poseEuler[b.name];
+        motors[b.name].rest = e ? qFromEulerXYZ(e) : [0, 0, 0, 1];
+      }
+    },
+  };
+}

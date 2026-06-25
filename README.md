@@ -29,6 +29,7 @@ The whole thing is four primitives: **`World` / `Body` / `Attach` (joint) / `Mot
 - `Attach(A, rA, B, rB, compliance=0)` — ball joint keeping local points coincident (re-iterated to hold a chain).
 - `Motor(A, B, restQuat, compliance)` — drive B's orientation relative to A toward `restQuat`; compliance = muscle softness (small = strong, large = sags).
 - `makeArm(world, opts)` → `{ upper, lower, setTarget(qU,qL), handPos() }` — a 2-bone active-ragdoll arm.
+- `makeUpperBody(world, opts)` → `{ bodies, setPose(poseEuler) }` — a pelvis-anchored upper-body chain (M2). `setPose` takes a motion-engine pose (`{bone:[x,y,z]}`) as the motor targets; read `bodies[name].q` for the physical result. `qFromEulerXYZ`, `UPPER_BODY` exported too.
 
 ## Test
 
@@ -40,7 +41,7 @@ Headless proof of the active ragdoll: stable under stiff motors, joints stay con
 
 ## Status
 
-**M1** (this): XPBD core + 2-bone active-ragdoll arm. Roadmap: M2 full pelvis-anchored upper-body chain driven by motion-engine targets · M3 contacts + bulk self-collision · M4 integrate into a host as an opt-in physical mode.
+**M1** XPBD core + 2-bone active-ragdoll arm. **M2** (this) full pelvis-anchored upper-body chain (`makeUpperBody` + `setPose`) driven by motion-engine poses. Roadmap: M3 contacts + bulk self-collision · M4 integrate into a host as an opt-in physical mode.
 
 ## License
 
