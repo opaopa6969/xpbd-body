@@ -25,11 +25,12 @@ The whole thing is four primitives: **`World` / `Body` / `Attach` (joint) / `Mot
 ## API
 
 - `new World({ gravity?, linDamp?, angDamp? })` → `step(dt, substeps=20)`, `add(body)`, `constrain(c)`.
-- `new Body({ pos, q, mass, radius, fixed })` — rigid body (isotropic inertia for now).
+- `new Body({ pos, q, mass, radius, cr?, fixed })` — rigid body (isotropic inertia for now). `cr` = collision radius for M3 contacts (defaults to `radius`).
 - `Attach(A, rA, B, rB, compliance=0)` — ball joint keeping local points coincident (re-iterated to hold a chain).
 - `Motor(A, B, restQuat, compliance)` — drive B's orientation relative to A toward `restQuat`; compliance = muscle softness (small = strong, large = sags).
+- `GroundContact(B, { y, compliance })` / `BoxContact(B, min, max, { compliance })` / `Contact(A, B, { compliance })` — one-sided contact constraints (M3): keep a body above a plane (table top), out of an AABB (tile / table edge), or apart from another body (self-collision). They no-op until penetration, then project out; re-iterated with the joints.
 - `makeArm(world, opts)` → `{ upper, lower, setTarget(qU,qL), handPos() }` — a 2-bone active-ragdoll arm.
-- `makeUpperBody(world, opts)` → `{ bodies, setPose(poseEuler) }` — a pelvis-anchored upper-body chain (M2). `setPose` takes a motion-engine pose (`{bone:[x,y,z]}`) as the motor targets; read `bodies[name].q` for the physical result. `qFromEulerXYZ`, `UPPER_BODY` exported too.
+- `makeUpperBody(world, { ..., profile })` → `{ bodies, setPose(poseEuler) }` — a pelvis-anchored upper-body chain (M2). `setPose` takes a motion-engine pose (`{bone:[x,y,z]}`) as the motor targets; read `bodies[name].q` for the physical result. A `profile` (BodyProfile: `{ mass, bulk, selfCollision }`, see `DEFAULT_PROFILE`) gives the body physical character — `mass` scales sag, `bulk` widens the trunk, `selfCollision` rides the forearms/hands around it instead of through it. Omit it and the body is byte-for-byte the M2 body. `qFromEulerXYZ`, `UPPER_BODY` exported too.
 
 ## Test
 
@@ -41,7 +42,7 @@ Headless proof of the active ragdoll: stable under stiff motors, joints stay con
 
 ## Status
 
-**M1** XPBD core + 2-bone active-ragdoll arm. **M2** (this) full pelvis-anchored upper-body chain (`makeUpperBody` + `setPose`) driven by motion-engine poses. Roadmap: M3 contacts + bulk self-collision · M4 integrate into a host as an opt-in physical mode.
+**M1** XPBD core + 2-bone active-ragdoll arm. **M2** full pelvis-anchored upper-body chain (`makeUpperBody` + `setPose`) driven by motion-engine poses. **M3** (this) contacts as one-sided XPBD constraints — ground/plane (table), AABB box (tile/edge), and sphere↔sphere self-collision driven by a `BodyProfile` (`bulk` widens the trunk so limbs ride around it). Roadmap: M4 integrate into a host as an opt-in physical mode (done in netmahg `?phys=1`) · contact friction · joint limits from the profile.
 
 ## License
 
