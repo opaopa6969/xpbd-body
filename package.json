@@ -1,0 +1,16 @@
+{
+  "name": "xpbd-body",
+  "version": "0.1.0",
+  "description": "Tiny from-scratch XPBD active-ragdoll for VRM upper bodies — real gravity / mass / contact that TRACKS a target pose. Pure, dependency-free, deterministic, headless-testable.",
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js",
+  "files": ["index.js"],
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "keywords": ["xpbd", "physics", "active-ragdoll", "vrm", "dynamics", "deterministic", "avatar", "ik"],
+  "license": "MIT",
+  "author": "opaopa6969",
+  "repository": { "type": "git", "url": "https://github.com/opaopa6969/xpbd-body.git" }
+}
