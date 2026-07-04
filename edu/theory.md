@@ -1,163 +1,165 @@
-# 理論のはなし ― 位置ベース物理でカラダを動かす
+**English** · [日本語](./theory.ja.md)
 
-登場人物: 中学生の**ユウ**と、このエンジンを書いてる**僕**。
+# Theory talk — moving a body with position-based physics
 
----
-
-**ユウ**「ねえ、これって人形が勝手に腕を動かすやつでしょ。中身どうなってんの?」
-
-**僕**「よく聞いてくれた。まず失敗談からいい?」
-
-**ユウ**「いきなり?」
-
-**僕**「最初さ、筋肉をバネで作ったのよ。関節に『この角度に戻れ!』ってバネをつけて。そしたら硬くすればするほど暴れてさ、あるとき人形が爆発して宇宙まで飛んでった。腕が惑星になった」
-
-**ユウ**「宇宙て」
-
-**僕**「笑いごとじゃなくて、これ物理シミュレーションあるあるなんだ。で、それを直すための考え方が『位置ベース物理(XPBD)』。今日はそれを話す」
+Cast: **Yu**, a middle schooler, and **me**, the one writing this engine.
 
 ---
 
-## ふつうの物理 ―「力→加速度→速度→位置」
+**Yu**: "Hey, isn't this the thing where the puppet moves its own arm? What's going on inside it?"
 
-**僕**「理科でやったよね。物に力を加えると加速する。加速すると速度がつく。速度がつくと位置が動く」
+**Me**: "Glad you asked. Can I start with a failure story first?"
 
-**ユウ**「F=ma のやつ。力=質量×加速度」
+**Yu**: "Out of nowhere?"
 
-**僕**「そう。ふつうのシミュレーションはこの順番で計算する。
+**Me**: "So at first, I built the muscles out of springs. I attached a spring to each joint like 'snap back to this angle!' Then the stiffer I made it, the more it thrashed, and at one point the puppet exploded and flew off into space. The arm became a planet."
 
-1. どんな力がかかってる? (重力とか、筋肉の力とか)
-2. じゃあ加速度は? (力を質量で割る)
-3. じゃあ速度は? (加速度を少し足す)
-4. じゃあ位置は? (速度のぶん動かす)
+**Yu**: "Space, huh."
 
-これを1コマ1コマ繰り返す。パラパラ漫画みたいにね」
-
-**ユウ**「ちゃんとしてるじゃん。なんで爆発すんの」
-
-**僕**「バネが硬いと、ちょっとズレただけで『力』がバカでかくなるからだよ。ズレを直そうとして強い力→行き過ぎる→逆向きに強い力→もっと行き過ぎる…って。ブランコを押す力を間違えて、どんどん振り幅がデカくなる感じ。これを『発散』って言う。僕の人形はこれで宇宙に行った」
+**Me**: "It's not a joke, this is a classic physics-simulation gotcha. And the idea that fixes it is 'position-based physics (XPBD)'. That's what I want to talk about today."
 
 ---
 
-## 位置ベース ―「まず動かして、間違ってたら引き戻す」
+## Ordinary physics — "force → acceleration → velocity → position"
 
-**ユウ**「じゃあどうすんの」
+**Me**: "You learned this in science class, right? Apply a force to an object, it accelerates. Once it accelerates, it gains velocity. Once it has velocity, its position moves."
 
-**僕**「発想をひっくり返す。**力から考えるのをやめて、位置から考える**」
+**Yu**: "The F=ma thing. Force = mass times acceleration."
 
-**ユウ**「?」
+**Me**: "Right. Ordinary simulations compute things in that order.
 
-**僕**「ビーズを紐で繋いだネックレス、想像して。紐の長さは決まってる。ビーズを1個ぐいっと動かすと、紐が伸びちゃう瞬間があるよね」
+1. What forces are acting on it? (gravity, muscle force, etc.)
+2. So what's the acceleration? (force divided by mass)
+3. So what's the velocity? (add a little acceleration)
+4. So what's the position? (move by that much velocity)
 
-**ユウ**「ピンと張る」
+Repeat this frame by frame. Like a flip-book."
 
-**僕**「そのとき何する? **紐の長さに合うようにビーズをそっと戻す**でしょ。力とか加速度とか一切考えてない。『長さが違う→合わせる』それだけ。これが位置ベースの心臓部なんだ。
+**Yu**: "That sounds proper. Why does it explode?"
 
-- ふつうの物理: 力を計算して → じわじわ動かす
-- 位置ベース: **とりあえず位置を動かして → ルール違反してたら、位置を直接直す**」
-
-**ユウ**「直すって、ワープさせるの?」
-
-**僕**「そう、ちょっとズルっぽいけどワープさせる。でもこれが超安定なの。だってどんなにズレてても『正しい位置に戻す』だけだから、力が暴走しようがない。硬い紐でも爆発しない」
-
-**ユウ**「なるほど、行き過ぎようがないのか」
+**Me**: "Because when a spring is stiff, even a tiny deviation makes the 'force' huge. It tries to fix the error with a strong force → overshoots → strong force the other way → overshoots even more... It's like pushing a swing with the wrong timing, and the swing amplitude just keeps growing. That's called 'divergence.' My puppet went to space because of it."
 
 ---
 
-## 「制約」―― 全部これ1個で扱う
+## Position-based — "move first, then pull back if it's wrong"
 
-**僕**「で、ここからが一番おいしいとこ。さっきの『紐の長さを守れ』みたいなルールを、**制約(せいやく)**って呼ぶ。守るべき約束、って意味」
+**Yu**: "So what do you do instead?"
 
-**ユウ**「制約」
+**Me**: "Flip the whole idea around. **Stop thinking in terms of force, and think in terms of position instead.**"
 
-**僕**「人間のカラダを動かすのに必要なルール、いくつあると思う?」
+**Yu**: "Huh?"
 
-**ユウ**「えー、関節がバラバラにならない、とか」
+**Me**: "Picture a necklace made of beads on a string. The string has a fixed length. If you yank one bead, there's a moment where the string would have to stretch."
 
-**僕**「正解。それ制約その1。**関節はくっついてろ**。肘の上の骨と下の骨、繋がってる点が離れちゃダメ。さっきのビーズの紐と同じ。ズレたら位置を戻す」
+**Yu**: "It goes taut."
 
-**ユウ**「ほかは?」
+**Me**: "What do you do at that moment? **You gently pull the bead back so the string matches its length.** You're not thinking about force or acceleration at all. It's just 'the length is wrong → fix it.' That's the heart of position-based physics.
 
-**僕**「制約その2、**筋肉**。『この角度になってろ』ってルール。腕をこの向きに保て、って約束。これも角度がズレてたら、そっちに向けて回して戻す」
+- Ordinary physics: compute the force → move gradually.
+- Position-based: **move the position first → if it broke a rule, correct the position directly.**"
 
-**ユウ**「筋肉もルールなの?力じゃなくて?」
+**Yu**: "Correct it — you mean warp it?"
 
-**僕**「そこが位置ベースの気持ちいいとこ。筋肉も『角度を守る制約』として書ける。だからバネみたいに暴れない」
+**Me**: "Yeah, it's a bit of a cheat, but you warp it. And that's what makes it so stable. No matter how far off it gets, all you do is 'snap it back to the correct position,' so the force can never run away. Even a stiff string doesn't explode."
 
-**僕**「制約その3、**地面**。『机にめり込むな』。手が机の中に入っちゃったら、机の上まで戻す。これも位置を直すだけ」
-
-**ユウ**「あれ、全部おんなじだ。ズレたら戻す」
-
-**僕**「**それ**。それが言いたかった。関節も、筋肉も、地面も、自分のお腹に腕がめり込むのも、ぜんぶ『制約』っていう**たった1種類の考え方**で扱える。エンジンの中では見分けがつかないくらい同じ。だからコードもすごくシンプルになる。これが位置ベースを選んだ一番の理由」
+**Yu**: "I see, so there's no way to overshoot."
 
 ---
 
-## compliance ―― 筋肉のやわらかさ
+## "Constraints" — handling everything with this one idea
 
-**ユウ**「でもさ、筋肉が『絶対この角度!』だと、ロボットみたいにカクカクじゃない?人間ってもっとダルっとするじゃん」
+**Me**: "And here's the best part. That rule from before, 'keep to the string's length,' is called a **constraint** — a promise that must be kept."
 
-**僕**「鋭い。そこで出てくるのが **compliance(コンプライアンス)**。日本語だと『やわらかさ』」
+**Yu**: "Constraint."
 
-**ユウ**「やわらかさ」
+**Me**: "How many rules do you think you need to move a human body?"
 
-**僕**「制約に『どれくらい厳しく守るか』のツマミをつけるんだ。
+**Yu**: "Um, like, joints shouldn't fall apart?"
 
-- compliance 小さい = **カチカチに守る** = 強い筋肉。目標の角度をビシッとキープ。
-- compliance 大きい = **ゆるく守る** = 弱い筋肉。守ろうとはするけど、重力に負けてズルズル下がる。
+**Me**: "Exactly. That's constraint #1. **Joints stay attached.** The bone above the elbow and the bone below it — the point where they connect must never separate. Same as the bead string from before. If it drifts, pull the position back."
 
-力を抜いた人が、そのまま座り込んじゃうでしょ。あれをこのツマミ1個で表現できる。数字を大きくするだけで、人形がだんだんヘタっていく」
+**Yu**: "What else?"
 
-**ユウ**「1個の数字で疲れ具合が出るのか。おもしろ」
+**Me**: "Constraint #2: **muscles**. The rule 'stay at this angle.' A promise to hold the arm at this orientation. This one also works by: if the angle is off, rotate toward the target and pull it back."
 
-**僕**「重い人形にすると、同じ筋肉の強さでも腕が下がる。マッチョは軽々、ヘロヘロはズーン。全部このやわらかさと重さの兼ね合いなんだ」
+**Yu**: "Muscles are a rule too? Not a force?"
 
----
+**Me**: "That's the satisfying part of position-based physics. Muscles can be written as 'a constraint that keeps an angle.' So they don't thrash around like springs."
 
-## サブステップ ―― ちょっとずつ何度も直す
+**Me**: "Constraint #3: **the ground**. 'Don't sink into the table.' If a hand goes inside the table, pull it back up to the tabletop. Again, just a position fix."
 
-**ユウ**「まだ引っかかってて。位置をワープで直すって、雑じゃない?一発でバシッと正しい位置わかるの?」
+**Yu**: "Wait, they're all the same. If it's off, pull it back."
 
-**僕**「わからない。特に関節がいっぱい繋がってると、片方を直すともう片方がズレる。肩を直したら肘がズレて、肘を直したら手首がズレて…」
-
-**ユウ**「モグラたたきじゃん」
-
-**僕**「まさにモグラたたき。だから**一発で完璧を狙わない**。ちょっと直す、ちょっと直す、を何回も繰り返す。だんだん全部が落ち着く。これを**サブステップ**っていう」
-
-**ユウ**「1コマの中で何回もやるの?」
-
-**僕**「そう。画面の1フレーム(1/60秒)を、さらに20個くらいの細切れにして、その細切れごとに『動かす→制約で直す』をやる。細かく刻むほど安定する。急いで大股で歩くと転ぶけど、小さい歩幅でちょこちょこ行けば転ばない、みたいな」
-
-**ユウ**「なるほどね。爆発した人形は大股だったわけだ」
-
-**僕**「そういうこと。細かく刻む+位置ベース、この2つで硬い筋肉でも安定する。宇宙に行かなくなった」
+**Me**: "**That.** That's exactly what I wanted to say. Joints, muscles, the ground, even an arm sinking into its own belly — all of it can be handled with **one single idea** called 'constraint.' Inside the engine, they're practically indistinguishable. That's why the code stays so simple. It's the number one reason I chose position-based physics."
 
 ---
 
-## まとめ ―― と、コードのどこに何があるか
+## Compliance — the softness of a muscle
 
-**ユウ**「整理するね。
+**Yu**: "But wait, if a muscle is 'absolutely this angle, no exceptions,' wouldn't it move like a stiff robot? People are more, like, floppy."
 
-- ふつうの物理は『力→加速度→速度→位置』。硬いと爆発する。
-- 位置ベースは『まず動かして、間違ってたら位置を直接戻す』。安定。
-- 関節も筋肉も地面も、ぜんぶ『制約』1種類で扱える。
-- compliance で筋肉のやわらかさを決める。ゆるいと座り込む。
-- サブステップで細かく何度も直すと安定する。
+**Me**: "Sharp catch. That's where **compliance** comes in. In Japanese it translates to 'softness.'"
 
-…合ってる?」
+**Yu**: "Softness."
 
-**僕**「完璧。中学生に完全に負けた」
+**Me**: "You attach a dial to the constraint that controls 'how strictly it's enforced.'
 
-**僕**「最後に、実際のコード(`index.js`)のどこがどれか一言ずつ:
+- Small compliance = **enforced rigidly** = a strong muscle. Holds the target angle tight.
+- Large compliance = **enforced loosely** = a weak muscle. It tries to hold the angle, but loses to gravity and droops down.
 
-- `Body` … 骨1本。質量・位置・向きを持つ物体。
-- `Attach` … 制約その1『関節はくっついてろ』。ビーズの紐。
-- `Motor` … 制約その2『筋肉』。目標の角度に向ける。`compliance` がやわらかさ。
-- `GroundContact` / `BoxContact` / `Contact` … 制約その3『めり込むな』。机、牌、自分のお腹。
-- `World.step()` … 1フレームを `substeps`(既定20)に刻んで、動かして→制約で直して、を繰り返す本体。
-- `makeArm` / `makeUpperBody` … これらを組み立てて、腕や上半身にしたもの。
+You know how someone who's relaxed just slumps down? You can express that with a single dial. Just crank up the number, and the puppet gradually goes limp."
 
-全部さっき話した比喩の、そのまんまだよ」
+**Yu**: "So a single number gives you a level of fatigue. That's neat."
 
-**ユウ**「じゃあ僕でも読めるかも」
+**Me**: "Make the puppet heavier, and even with the same muscle strength, the arm sags more. A muscular one holds up easily, a floppy one just sinks. It's all a balance between this softness and the weight."
 
-**僕**「読める読める。爆発させてみてよ、一回くらい」
+---
+
+## Substeps — fixing it a little at a time, many times
+
+**Yu**: "I'm still stuck on something. Warping the position to fix it — isn't that sloppy? Do you actually know the one, correct position in a single shot?"
+
+**Me**: "You don't. Especially once a bunch of joints are chained together, fixing one throws another off. Fix the shoulder, the elbow drifts; fix the elbow, the wrist drifts..."
+
+**Yu**: "That's whack-a-mole."
+
+**Me**: "Exactly whack-a-mole. So **you don't aim for perfection in one shot**. You fix it a little, fix it a little, and repeat that many times. Gradually everything settles down. This is called a **substep**."
+
+**Yu**: "You do it many times within a single frame?"
+
+**Me**: "Right. You take one frame on screen (1/60th of a second) and slice it into about 20 tiny pieces, and for each tiny piece you do 'move → fix with constraints.' The finer you slice it, the more stable it gets. It's like how you trip if you rush with big strides, but you don't trip if you take small, quick steps."
+
+**Yu**: "I see. So the exploding puppet was taking big strides."
+
+**Me**: "Exactly that. Fine slicing plus position-based physics — those two together keep it stable even with stiff muscles. No more trips to space."
+
+---
+
+## Summary — and where each piece lives in the code
+
+**Yu**: "Let me organize this.
+
+- Ordinary physics is 'force → acceleration → velocity → position.' It explodes when stiff.
+- Position-based is 'move first, then pull the position straight back if it's wrong.' Stable.
+- Joints, muscles, and the ground are all handled with one single idea: 'constraint.'
+- Compliance decides how soft a muscle is. Loose, and it slumps down.
+- Substeps fix things a little at a time, many times, for stability.
+
+...did I get that right?"
+
+**Me**: "Perfect. Completely outdone by a middle schooler."
+
+**Me**: "Lastly, here's a one-liner for what each piece of the actual code (`index.js`) corresponds to:
+
+- `Body` … a single bone. An object with mass, position, and orientation.
+- `Attach` … constraint #1, 'joints stay attached.' The bead string.
+- `Motor` … constraint #2, 'muscle.' Steers toward a target angle. `compliance` is the softness.
+- `GroundContact` / `BoxContact` / `Contact` … constraint #3, 'don't sink in.' The table, a tile, your own belly.
+- `World.step()` … the main body that slices one frame into `substeps` (default 20), and repeats 'move → fix with constraints.'
+- `makeArm` / `makeUpperBody` … these assembled together into an arm or an upper body.
+
+It's all exactly the metaphors we just talked about, no more, no less."
+
+**Yu**: "Then maybe even I could read it."
+
+**Me**: "You could, easily. Go ahead and make it explode once, just for fun."

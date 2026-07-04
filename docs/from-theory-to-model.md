@@ -1,145 +1,147 @@
-# 理論から engine/model へ ―― xpbd-body の設計ドキュメント
+**English** · [日本語](./from-theory-to-model.ja.md)
 
-このドキュメントは、`edu/theory.md` で語った**理論(位置ベース物理 / 制約 / サブステップ / compliance)**を、どうやって実際の `index.js` の**アルゴリズム → データ構造 → 実装方針 → テスト**へ落としたかを記録する。理論と実装を1対1で対応づけるのが目的。
+# From theory to the engine/model — the xpbd-body design document
 
-前提: xpbd-body は motion-engine の **L3(動力学)層**。L2 が運動学的に「目標ポーズ」を生成し、L3 は**実際の質量と重力を持つカラダ**にそのポーズを**物理的に追従**させる。弱ければ垂れ、押されれば反応し、接触を尊重する。
+This document records how the **theory (position-based physics / constraints / substeps / compliance)** told in `edu/theory.md` was turned into the actual **algorithm → data structures → implementation policy → tests** of `index.js`. The goal is to map theory and implementation one-to-one.
+
+Premise: xpbd-body is motion-engine's **L3 (dynamics) layer**. L2 kinematically generates a "target pose," and L3 makes a **body with real mass and gravity** **physically track** that pose. If it's weak, it sags; if pushed, it reacts; it respects contact.
 
 ---
 
-## 1. 理論 → 選択
+## 1. Theory → choices
 
-理論編の主張は次の4つだった。これがそのまま設計判断になっている。
+The theory section made four claims. Each one became a design decision as-is.
 
-| 理論 | なぜ嬉しいか | 実装上の帰結 |
+| Theory | Why it's nice | Consequence for the implementation |
 | --- | --- | --- |
-| **位置ベース** (力でなく位置を直接直す) | 硬い筋肉でも発散しない | 積分は速度Verlet風、補正は位置に直接 |
-| **制約という1概念** | 関節・筋肉・接触が同種に解ける | `solve(h)` を持つオブジェクトの配列1本で全部回す |
-| **compliance** | 筋肉のやわらかさ = 1つの数字 | 各制約の分母に `α = compliance / h²` を足すだけ |
-| **サブステップ** | 細かく刻むと安定 | `World.step` が `dt` を `substeps` 分割 |
+| **Position-based** (fix position directly, not force) | Doesn't diverge even with stiff muscles | Integration is velocity-Verlet-like; correction is applied directly to position |
+| **A single concept: "constraint"** | Joints, muscles, and contacts all solve the same way | One array of objects that each have `solve(h)`, run through in a single loop |
+| **Compliance** | Muscle softness = a single number | Just add `α = compliance / h²` to each constraint's denominator |
+| **Substeps** | Slicing finely is stable | `World.step` divides `dt` into `substeps` |
 
-「力→加速度」を捨て、「位置を動かす → 制約で引き戻す」に全振りしたのが根っこの決定。これで**関節も筋肉も地面も同じループで解ける**という単純さが手に入る。
-
----
-
-## 2. アルゴリズム
-
-### 2.1 サブステップの dt 分割 (`World.step`)
-
-1フレーム `dt` を `substeps`(既定20)個の小ステップ `h = dt / substeps` に割る。各小ステップで:
-
-1. **予測**: 重力を速度に足し、位置・向きを `h` だけ前進させる(`p += v·h`、向きは角速度から)。直前の位置 `pp` / 向き `pq` を控えておく。
-2. **制約投影**: すべての制約の `solve(h)` を呼び、ズレを位置・向きへ直接補正する。
-3. **速度の再計算**: 「直った位置」と「控えておいた予測前の位置」の差から速度を逆算する(`v = (p − pp) / h`)。ここで減衰(`linDamp`/`angDamp`)を掛ける。
-
-ポイントは 3。**速度は積分するのでなく、位置の変化から後で求める**。これが位置ベース(PBD/XPBD)の肝で、制約でワープさせた分がちゃんと速度に反映される(押されて戻る、が自然に出る)。
-
-### 2.2 制約投影の反復 (Gauss–Seidel)
-
-理論編の「モグラたたき」問題。チェーンは1回では全制約を同時に満たせない。そこで:
-
-- まず**全制約**を1周 `solve`(モーターもここで解く)。
-- そのあと**関節と接触だけ**を追加で3周 `solve`(`if (c.joint || c.contact)`)。
-
-関節を余分に反復するのは、チェーンの全アタッチを同時収束させるため。接触を反復するのは、**関節が骨を引き戻したあとに再度めり込みを解消する**ため(順序次第で「関節が今動かした肢体が胴体にめり込んだまま」になるのを防ぐ)。
-
-**モーターを追加反復から外している**のが設計判断。モーターまで何度も解くと筋肉が過剰に硬くなり、compliance の意味が壊れる。だから「筋肉は1周だけ、骨の接続と接触はしっかり収束」という非対称にしている。
-
-### 2.3 Attach(関節)の解き方
-
-ボールジョイント。A上のローカル点 `rA` と B上のローカル点 `rB` を一致させる。
-
-- ワールドでの2点のズレ `C`(長さ `c`、方向 `n`)を測る。
-- 各ボディの**実効質量** `w = invM + invI·|r×n|²` を求める(並進しやすさ+その点で回りやすさ)。
-- XPBD の補正量 `Δλ = −c / (wA + wB + α)`、`α = compliance / h²`。
-- 補正ベクトル `P = n·Δλ` を、並進(`invM`で分配)と回転(`r×P` を `invI`で分配)に効かせる。
-
-`compliance = 0` なら `α = 0` で剛体関節。`α` が分母に入ることで、**硬さがステップ幅に依存せず一定**になる ―― これが PBD ではなく **X**PBD(拡張)である理由。
-
-### 2.4 Motor(筋肉)の解き方
-
-B の「親Aに対する相対姿勢」を目標 `rest` に向ける角度制約。
-
-- 現在の相対姿勢 `qRel = conj(A.q)·B.q`。
-- 目標までの回転誤差 `qErr = rest · conj(qRel)`。最短経路を取るため `qErr[3] < 0` なら符号反転。
-- 誤差クォータニオンの虚部×2をワールドへ回して**回転ベクトル `θ`**(軸×角度)にする。
-- `Δλ = ang / (A.invI + B.invI + α)` を軸方向に、両ボディへ `invI` で分配して回す。
-
-構造は Attach とそっくり(位置版が回転版になっただけ)。**同じ XPBD の型**に収まっているのが、理論編「制約1種類で全部」の実体。`compliance` が筋力そのもの: 小=強、大=重力に負けて垂れる。
-
-### 2.5 接触の解き方(片側制約)
-
-`GroundContact` / `BoxContact` / `Contact` はいずれも**片側**。めり込むまで**何もしない**(early return)。めり込んだら法線方向に押し出す:
-
-- Ground: 平面 `y` に対し `pen = (y + cr) − p.y`。正なら `p.y += pen / (1 + α)`。
-- Box: AABB を `cr` ぶん膨らませ、外なら何もしない。中なら**一番浅い面**から押し出す。
-- Contact(球↔球): COM 距離が `A.cr + B.cr` 未満なら、法線方向に `invM` で分配して押し離す ―― これが自己衝突(腕が胴体を回り込む)。
-
-接触は位置のみ(トルクなし)、各ボディを COM 中心の半径 `cr` の球として扱う。上半身が机から浮き、肢体が胴体を貫かないために必要十分な近似。
+The root decision was to abandon "force → acceleration" and go all in on "move the position → pull it back with constraints." That's what buys the simplicity of **solving joints, muscles, and the ground in the same loop**.
 
 ---
 
-## 3. データ構造
+## 2. Algorithm
 
-理論の4概念に、4つのプリミティブがちょうど対応する。
+### 2.1 Dividing dt into substeps (`World.step`)
 
-- **`World`** … 全体。`bodies[]` と `constraints[]` を持ち、`step(dt, substeps)` で回す。`gravity` / `linDamp` / `angDamp` を保持。
-- **`Body`** … 骨1本。`p`(位置)/`q`(向き)/`v`,`w`(速度・角速度)/`invM`,`invI`(逆質量・逆慣性)/`cr`(衝突半径)。`fixed` なら `invM=invI=0` で不動(肩・骨盤のアンカー)。慣性は当面**等方**(球近似 `I = 2/5·m·r²`)。
-- **`Attach`** / **`Motor`** / **`*Contact`** … いずれも `{ solve(h) }` を返すだけの制約オブジェクト。`joint:true` / `contact:true` のフラグで追加反復の対象を見分ける。
+One frame's `dt` is split into `substeps` (default 20) small steps of `h = dt / substeps`. Each small step does:
 
-**設計の要**: 制約はすべて `solve(h)` という**同一インターフェース**。`World` は中身を知らずに配列を回すだけ。新しい制約(摩擦・関節可動域・新しい接触)は `solve(h)` を1個足すだけで入る ―― 理論編で言った「全部同じ種類」がAPIの形になっている。
+1. **Predict**: add gravity to velocity, and advance position/orientation by `h` (`p += v·h`; orientation from angular velocity). Keep the previous position `pp` / orientation `pq` before advancing.
+2. **Constraint projection**: call `solve(h)` on every constraint, correcting the drift directly on position/orientation.
+3. **Recompute velocity**: derive velocity from the difference between the "corrected position" and the "position kept before prediction" (`v = (p − pp) / h`). Damping (`linDamp`/`angDamp`) is applied here.
 
-組み立て関数:
+The key is step 3. **Velocity isn't integrated — it's derived afterward from the change in position.** This is the heart of position-based (PBD/XPBD): whatever amount the constraints warped things by is properly reflected back into velocity (which is what naturally produces "gets pushed, then recovers").
 
-- `makeArm` … アンカー→上腕→前腕の2ボーン能動ラグドール。
-- `makeUpperBody` … 骨盤アンカーの上半身チェーン(`UPPER_BODY` 骨格 + `BodyProfile`)。`setPose(poseEuler)` が motion-engine ポーズを各モーターの `rest` に流し込む。
+### 2.2 Iterating constraint projection (Gauss–Seidel)
 
-**モーターを先に、Attachを最後に**登録しているのは順序が意味を持つから: モーターが骨をCOM周りに回して関節点をずらす → そのあと Attach が引き戻す → 各サブステップが「接続済み」で終わる(ドリフトしない)。
+The "whack-a-mole" problem from the theory section: a chain can't satisfy all its constraints simultaneously in a single pass. So:
 
-`BodyProfile`(`{ mass, bulk, selfCollision }`)がアバターの体格。`mass` は垂れ具合、`bulk` は胴体コライダーを太らせて腕が回り込む幅、`selfCollision` は胴↔前腕/手の接触を有効化。既定値は M2 のボディをバイト単位で再現(体格を渡さなければ挙動不変)。
+- First, solve **all constraints** once (motors are solved here too).
+- Then solve **only the joints and contacts** for 3 additional passes (`if (c.joint || c.contact)`).
+
+Joints get extra iterations so the whole chain of attachments converges together. Contacts get extra iterations so that **penetration gets resolved again after a joint has pulled a bone back** (preventing the order-dependent case where "the limb the joint just moved is left sunk into the torso").
+
+**Excluding motors from the extra iterations** is a deliberate design choice. If motors were solved repeatedly too, the muscle would become excessively stiff and break the meaning of compliance. Hence the asymmetry: "solve the muscle once, but converge the bone connections and contacts thoroughly."
+
+### 2.3 How Attach (joints) is solved
+
+A ball joint. It keeps a local point `rA` on A coincident with a local point `rB` on B.
+
+- Measure the world-space gap `C` between the two points (length `c`, direction `n`).
+- Compute each body's **effective mass** `w = invM + invI·|r×n|²` (how easily it translates, plus how easily it rotates around that point).
+- The XPBD correction is `Δλ = −c / (wA + wB + α)`, with `α = compliance / h²`.
+- The correction vector `P = n·Δλ` is applied to translation (distributed via `invM`) and rotation (`r×P` distributed via `invI`).
+
+When `compliance = 0`, `α = 0` and the joint is rigid. Having `α` in the denominator makes the **stiffness independent of step size and constant** — that's the reason this is **X**PBD (extended), not plain PBD.
+
+### 2.4 How Motor (muscle) is solved
+
+An angular constraint that drives B's orientation relative to its parent A toward a target `rest`.
+
+- Current relative orientation: `qRel = conj(A.q)·B.q`.
+- Rotation error to the target: `qErr = rest · conj(qRel)`. Flip the sign if `qErr[3] < 0`, to take the shortest path.
+- Rotate the imaginary part of the error quaternion (×2) into world space to get a **rotation vector `θ`** (axis × angle).
+- `Δλ = ang / (A.invI + B.invI + α)` is applied along the axis, distributed to both bodies via `invI`.
+
+The structure mirrors Attach almost exactly (the positional version becomes a rotational one). Fitting into the **same XPBD shape** is the concrete embodiment of the theory section's "one kind of constraint for everything." `compliance` is literally the muscle strength: small = strong, large = loses to gravity and sags.
+
+### 2.5 How contacts are solved (one-sided constraints)
+
+`GroundContact` / `BoxContact` / `Contact` are all **one-sided**. They **do nothing** (early return) until penetration occurs. Once penetration happens, they push out along the normal:
+
+- Ground: for the plane `y`, `pen = (y + cr) − p.y`. If positive, `p.y += pen / (1 + α)`.
+- Box: the AABB is inflated by `cr`; if outside, do nothing. If inside, push out from the **shallowest face**.
+- Contact (sphere↔sphere): if the COM distance is less than `A.cr + B.cr`, push apart along the normal, distributed via `invM` — this is what produces self-collision (an arm riding around the torso).
+
+Contacts are position-only (no torque), treating each body as a sphere of radius `cr` centered at its COM. This is a necessary-and-sufficient approximation for keeping the upper body afloat above a table and limbs from piercing the torso.
 
 ---
 
-## 4. 実装方針
+## 3. Data structures
 
-motion-engine と同じ流儀を厳守する。
+The theory's four concepts map exactly onto four primitives.
 
-- **pure / 依存ゼロ**: 外部ライブラリなし。vec3/quat も手書き(`v3` / `q4`)。Node でヘッドレスに動く。
-- **決定論**: `Math.random` 禁止。乱数・時刻・環境依存を一切入れない。同じ入力→同じ出力。決定論リプレイと互換。
-- **固定サブステップ**: `step` は `dt` を固定数(既定20)に割る。可変ステップにしない ―― 再現性とリプレイ互換のため。
-- **副作用なし**: 制約は `World` の状態(bodyの `p`/`q`)だけを触る。I/O もログもしない。
-- **等方慣性の割り切り**: いまは球近似。実慣性テンソルと摩擦・可動域は将来。設計は `solve(h)` を足すだけで拡張できる形に留めてある。
+- **`World`** … the whole. Holds `bodies[]` and `constraints[]`, driven by `step(dt, substeps)`. Keeps `gravity` / `linDamp` / `angDamp`.
+- **`Body`** … a single bone. `p` (position) / `q` (orientation) / `v`, `w` (linear/angular velocity) / `invM`, `invI` (inverse mass/inertia) / `cr` (collision radius). If `fixed`, `invM=invI=0` and it's immovable (shoulder/pelvis anchors). Inertia is **isotropic** for now (sphere approximation, `I = 2/5·m·r²`).
+- **`Attach`** / **`Motor`** / **`*Contact`** … all just constraint objects that expose `{ solve(h) }`. Flags `joint:true` / `contact:true` mark which ones are targeted by the extra iterations.
 
-これらは飾りでなく、**ヘッドレスで単体テストできること**と**リプレイで同じ絵が出ること**を保証するための制約。物理エンジンとしての正しさより、この2つを優先する。
+**The essence of the design**: every constraint shares the same `solve(h)` interface. `World` just loops through the array without knowing what's inside. A new constraint (friction, joint limits, a new kind of contact) drops in with just one more `solve(h)` — the theory section's "everything is the same kind" is what gives the API its shape.
 
----
+Assembly functions:
 
-## 5. テスト方針
+- `makeArm` … a 2-bone active ragdoll: anchor → upper arm → forearm.
+- `makeUpperBody` … a pelvis-anchored upper-body chain (`UPPER_BODY` skeleton + `BodyProfile`). `setPose(poseEuler)` feeds a motion-engine pose into each motor's `rest`.
 
-`test.mjs`(`npm test`)は能動ラグドールの**ヘッドレスな証明**として、性質単位で検証する。数値の丸めでなく**振る舞いの性質**を確かめるのが方針。
+Motors are registered **first**, and Attach **last**, and that order matters: a motor rotates a bone around its COM, shifting the joint point → then Attach pulls it back → each substep ends "connected" (no drift).
 
-検証する性質:
-
-1. **安定性**: 硬いモーター下でも発散しない(位置・速度が有限に収まる)。理論編「爆発しない」の回帰テスト。
-2. **接続性**: 関節が繋がったまま(Attach のズレが閾値以下)。チェーンがバラけない。
-3. **追従**: 強い筋肉(小 compliance)が目標ポーズをちゃんと追う(最終姿勢が目標に十分近い)。
-4. **垂れ(sag)**: 弱い/重い腕は重力で下がる(compliance を上げ、mass を上げると手先が下がる)。compliance の意味が効いている証明。
-5. **押されて回復**: 外から突くと一旦乱れ、時間が経つと目標へ戻る。位置ベースで速度が正しく再構成されている証明。
-6. **決定論**: 同じ初期条件で2回回して**ビット単位で一致**。`Math.random` 排除と固定サブステップの担保。
-
-いずれも「正しい数値」でなく「**満たすべき制約(=性質)**」をテストしている。これ自体が理論編の思想 ―― 守るべき約束を決めて、外れていたら直す ―― のテスト版になっている。
+`BodyProfile` (`{ mass, bulk, selfCollision }`) is the avatar's build. `mass` controls how much it sags, `bulk` fattens the torso collider so the arms ride around it, `selfCollision` enables contact between the torso and forearms/hands. The default reproduces the M2 body byte-for-byte (behavior is unchanged if no profile is given).
 
 ---
 
-## 付録: 理論語 ↔ コード対応表
+## 4. Implementation policy
 
-| 理論編の言葉 | コード |
+Strictly follows the same conventions as motion-engine.
+
+- **Pure / zero dependencies**: no external libraries. vec3/quat are also hand-written (`v3` / `q4`). Runs headless in Node.
+- **Determinism**: `Math.random` is forbidden. No randomness, wall-clock time, or environment dependence of any kind. Same input → same output. Compatible with deterministic replay.
+- **Fixed substeps**: `step` divides `dt` into a fixed count (default 20). Never variable-step — for reproducibility and replay compatibility.
+- **No side effects**: constraints only touch `World`'s own state (a body's `p`/`q`). No I/O, no logging.
+- **Isotropic inertia, deliberately**: a sphere approximation for now. Real inertia tensors and friction/joint limits are future work. The design is kept extensible so those only require adding a `solve(h)`.
+
+These aren't decoration — they guarantee **headless unit-testability** and **replay producing the same picture**. Those two properties are prioritized over correctness as a general-purpose physics engine.
+
+---
+
+## 5. Test policy
+
+`test.mjs` (`npm test`) verifies the active ragdoll as a **headless proof**, property by property. The policy is to check **behavioral properties**, not rounded numeric values.
+
+Properties verified:
+
+1. **Stability**: doesn't diverge even under stiff motors (position/velocity stay finite). The regression test for the theory section's "doesn't explode."
+2. **Connectivity**: joints stay attached (Attach's drift stays below a threshold). The chain doesn't fall apart.
+3. **Tracking**: a strong muscle (small compliance) properly tracks the target pose (final pose is close enough to the target).
+4. **Sag**: a weak/heavy arm droops under gravity (raising compliance and mass lowers the hand). Proof that compliance's meaning actually takes effect.
+5. **Push and recover**: an external poke disturbs it momentarily, and it returns to the target over time. Proof that velocity is correctly reconstructed under the position-based scheme.
+6. **Determinism**: running twice from the same initial conditions matches **bit-for-bit**. Guarantees the exclusion of `Math.random` and the fixed substep count.
+
+Every one of these tests "the constraint (= property) that must be satisfied," not "the correct number." This is itself the test-side version of the theory section's philosophy — decide what promises must be kept, and fix things when they're broken.
+
+---
+
+## Appendix: theory-speak ↔ code mapping table
+
+| Theory-section term | Code |
 | --- | --- |
-| 力→位置でなく、位置を直接直す | `World.step` の予測→`solve`→速度逆算 |
-| ビーズの紐(関節はくっつく) | `Attach` |
-| 筋肉(この角度になれ) | `Motor` の `rest` |
-| 筋肉のやわらかさ | `compliance`(→ `α = compliance/h²`) |
-| めり込むな(机・牌・お腹) | `GroundContact` / `BoxContact` / `Contact` |
-| 細かく何度も直す | `substeps` 分割 + `joint`/`contact` の追加反復 |
-| モグラたたきを収束させる | Gauss–Seidel の3周ループ |
-| カラダを組み立てる | `makeArm` / `makeUpperBody` |
-| 体格(重さ・太さ) | `BodyProfile` = `{ mass, bulk, selfCollision }` |
+| Fix position directly, not force → position | Predict → `solve` → derive velocity, inside `World.step` |
+| A string of beads (joints stick together) | `Attach` |
+| Muscle (be at this angle) | `Motor`'s `rest` |
+| Muscle softness | `compliance` (→ `α = compliance/h²`) |
+| Don't sink in (table, tile, belly) | `GroundContact` / `BoxContact` / `Contact` |
+| Fix it repeatedly, in small steps | `substeps` division + extra iterations for `joint`/`contact` |
+| Converging the whack-a-mole | The Gauss–Seidel 3-pass loop |
+| Assembling a body | `makeArm` / `makeUpperBody` |
+| Build (weight · girth) | `BodyProfile` = `{ mass, bulk, selfCollision }` |
