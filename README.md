@@ -1,3 +1,5 @@
+**English** · [日本語](./README.ja.md)
+
 # xpbd-body
 
 > A tiny from-scratch **XPBD active-ragdoll** for VRM upper bodies — real gravity, mass, momentum and contact, that **tracks a target pose**.
