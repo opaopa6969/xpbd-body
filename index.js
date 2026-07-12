@@ -100,7 +100,8 @@ export function Attach(A, rA, B, rB, compliance = 0) {
 // (sags under gravity). This is the PD "muscle" as a compliant XPBD constraint.
 export function Motor(A, B, rest, compliance = 0.0005) {
   return {
-    rest,
+    motor: true,                                          // tagged so snapshot/restore can find the CONTROL state
+    A, B, rest, compliance,                               // `compliance` is a live field: the control may vary it per frame
     solve(h) {
       const qRel = q4.mul(q4.conj(A.q), B.q);             // current child-in-parent
       let qErr = q4.mul(this.rest, q4.conj(qRel));        // rotation needed (parent frame)
@@ -108,7 +109,7 @@ export function Motor(A, B, rest, compliance = 0.0005) {
       const theta = q4.rot(A.q, [2 * qErr[0], 2 * qErr[1], 2 * qErr[2]]);   // → world
       const ang = v3.len(theta); if (ang < 1e-9) return;
       const axis = v3.scale(theta, 1 / ang);
-      const at = compliance / (h * h);
+      const at = this.compliance / (h * h);
       const dl = ang / (A.invI + B.invI + at);
       const corr = v3.scale(axis, dl);
       A.applyDRot(v3.scale(corr, -A.invI));
@@ -328,7 +329,7 @@ export function makeUpperBody(world, { skeleton = UPPER_BODY, mass = 1.0, compli
     }
   }
   return {
-    bodies, parentOf, profile: prof,
+    bodies, motors, parentOf, profile: prof, skeleton,
     setPose(poseEuler) {
       for (const b of skeleton) {
         if (!b.parent || !motors[b.name]) continue;

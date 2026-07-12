@@ -32,7 +32,25 @@ The whole thing is four primitives: **`World` / `Body` / `Attach` (joint) / `Mot
 - `Motor(A, B, restQuat, compliance)` — drive B's orientation relative to A toward `restQuat`; compliance = muscle softness (small = strong, large = sags).
 - `GroundContact(B, { y, compliance })` / `BoxContact(B, min, max, { compliance })` / `Contact(A, B, { compliance })` — one-sided contact constraints (M3): keep a body above a plane (table top), out of an AABB (tile / table edge), or apart from another body (self-collision). They no-op until penetration, then project out; re-iterated with the joints.
 - `makeArm(world, opts)` → `{ upper, lower, setTarget(qU,qL), handPos() }` — a 2-bone active-ragdoll arm.
-- `makeUpperBody(world, { ..., profile })` → `{ bodies, setPose(poseEuler) }` — a pelvis-anchored upper-body chain (M2). `setPose` takes a motion-engine pose (`{bone:[x,y,z]}`) as the motor targets; read `bodies[name].q` for the physical result. A `profile` (BodyProfile: `{ mass, bulk, selfCollision }`, see `DEFAULT_PROFILE`) gives the body physical character — `mass` scales sag, `bulk` widens the trunk, `selfCollision` rides the forearms/hands around it instead of through it. Omit it and the body is byte-for-byte the M2 body. `qFromEulerXYZ`, `UPPER_BODY` exported too.
+- `makeUpperBody(world, { ..., profile })` → `{ bodies, motors, setPose(poseEuler) }` — a pelvis-anchored upper-body chain (M2). `setPose` takes a motion-engine pose (`{bone:[x,y,z]}`) as the motor targets; read `bodies[name].q` for the physical result. A `profile` (BodyProfile: `{ mass, bulk, selfCollision }`, see `DEFAULT_PROFILE`) gives the body physical character — `mass` scales sag, `bulk` widens the trunk, `selfCollision` rides the forearms/hands around it instead of through it. Omit it and the body is byte-for-byte the M2 body. `qFromEulerXYZ`, `UPPER_BODY` exported too.
+
+## Inverse dynamics (M4) — `xpbd-body/inverse`
+
+The active ragdoll is already a **forward model** (control → trajectory). M4 adds the machinery to run it *backwards*: given an observed pose trajectory, estimate the **control** that produced it. That is what [keiko-engine](https://github.com/opaopa6969/keiko-engine) needs so its motion descriptor is the estimated control, not raw 2D positions. See **[docs/inverse-dynamics.md](./docs/inverse-dynamics.md)**.
+
+```js
+import { makeRig, simulate, estimateControl } from 'xpbd-body/inverse';
+
+const rig = makeRig({ compliance: 0.00006 });        // body + priors (ROM, torque ceilings)
+const traj = simulate(rig, control, 1 / 60, 120);    // control → trajectory. pure, deterministic
+const { control, residual, feasible } = estimateControl(rig, observedTrajectory);
+```
+
+- `snapshot(world)` / `restore(world, snap)` — plain-data dump/restore of every body **and the motor control state**, so an estimation loop can rewind and try a different control from a bit-identical start.
+- `simulate(rig, controlTrajectory, dt, steps)` → `poseTrajectory` — the forward model. **Side-effect free** (snapshots and restores the world) and **deterministic**. The incremental `world.step(dt)` API is untouched.
+- `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations }` — analysis by synthesis: guess a control, run it forward, look at the gap, fix the guess. Gradient-free (coordinate descent, or a seeded CEM), no `Math.random` anywhere. `feasible: false` names the joint that broke its **range of motion**, blew its **torque ceiling**, or the **residual** that says this body simply cannot do that.
+
+**The inverse problem is ill-posed** and the API says so (`unique: false`): many controls produce the same visible motion, contact forces are unobservable, a monocular observation has no depth. `estimateControl` returns *one* control — the one the residual and the smoothing regulariser picked — not *the* control. [The limits are documented.](./docs/inverse-dynamics.md)
 
 ## Test
 
@@ -40,11 +58,11 @@ The whole thing is four primitives: **`World` / `Body` / `Attach` (joint) / `Mot
 node test.mjs     # or: npm test
 ```
 
-Headless proof of the active ragdoll: stable under stiff motors, joints stay connected, a strong muscle tracks the target, a weak/heavier arm sags under gravity, a shove perturbs then recovers, and it's deterministic.
+Headless proof of the active ragdoll: stable under stiff motors, joints stay connected, a strong muscle tracks the target, a weak/heavier arm sags under gravity, a shove perturbs then recovers, and it's deterministic. Plus the M4 inverse layer: a **synthetic round trip** (known control → trajectory → estimate → back to the control within 0.003 rad rms), rewind-and-retry, and all three infeasibility prongs.
 
 ## Status
 
-**M1** XPBD core + 2-bone active-ragdoll arm. **M2** full pelvis-anchored upper-body chain (`makeUpperBody` + `setPose`) driven by motion-engine poses. **M3** (this) contacts as one-sided XPBD constraints — ground/plane (table), AABB box (tile/edge), and sphere↔sphere self-collision driven by a `BodyProfile` (`bulk` widens the trunk so limbs ride around it). Roadmap: M4 integrate into a host as an opt-in physical mode (done in netmahg `?phys=1`) · contact friction · joint limits from the profile.
+**M1** XPBD core + 2-bone active-ragdoll arm. **M2** full pelvis-anchored upper-body chain (`makeUpperBody` + `setPose`) driven by motion-engine poses. **M3** contacts as one-sided XPBD constraints — ground/plane (table), AABB box (tile/edge), and sphere↔sphere self-collision driven by a `BodyProfile` (`bulk` widens the trunk so limbs ride around it). **M4** (this) inverse dynamics — snapshot/restore, a pure forward model, and gradient-free control estimation. Roadmap: contact friction · joint limits as XPBD constraints (not just a post-hoc feasibility prior) · keiko-engine integration.
 
 ## License
 
