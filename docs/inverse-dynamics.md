@@ -32,7 +32,7 @@ Pure. **Side-effect free**: it snapshots the world on entry and restores it on e
 
 A control frame is `{ pose: { bone: [x, y, z] }, compliance?: { bone: number } }` — the same Euler-XYZ pose a motion-engine frame is. A short trajectory holds its last frame. Each output frame carries `rel` (the bone's local rotation = what a renderer applies), `pos`, and `torque` (what the muscle is pulling at, right now).
 
-### `estimateControl(rig, observed, opts)` → `{ control, residual, feasible }` *(issue #3)*
+### `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations, unique }` *(issue #3)*
 
 Guess a control, run it forward, look at the gap, fix the guess. Gradient-free — the simulator is a black box with contacts in it, there is no clean derivative — and **deterministic** (a seeded PRNG; `Math.random` appears nowhere in this repo).
 
