@@ -56,9 +56,19 @@ const { control, residual, feasible } = estimateControl(rig, observedTrajectory)
 
 ```sh
 node test.mjs     # or: npm test
+npm run mcp:test  # MCP サーバの e2e（起動 → tools/resources を叩く）
 ```
 
 能動ラグドールのヘッドレスな証明: 硬いモーターの下でも安定、関節が繋がったまま、強い筋肉が目標を追従、弱い/重い腕は重力で垂れ、突かれると乱れてから回復し、決定論的である。加えて M4 の逆動力学層: **合成往復検証**(既知の制御 → 軌道 → 推定 → 元の制御に rms 0.003 rad 以内で戻る)、巻き戻して別の制御を試す、そして3つの infeasible 判定すべて。
+
+## MCP
+
+このライブラリは **MCP サーバ**でもある（namespace `xpbd`・[volta](https://github.com/opaopa6969/volta-mcp) 参加）。前向きモデルと逆動力学層を tool として公開し、他の MCP サービスが組み合わせられるようにする。
+
+- **仕様**: `xpbd://spec`（機械可読）。**ガイド**: `xpbd://guide`。
+- **tools**: `simulate`（ポーズ→物理追従）、`estimate_control_start/status/result`（観測→制御推定・job 型）、`check_feasible`（物理可能性判定）。
+- **ローカル起動**: `PORT=9204 npm run mcp:start` → `curl http://127.0.0.1:9204/healthz`。
+- **設計**: `docs/mcp/DESIGN.md`。**状況**: `docs/mcp/STATUS.md`。**skill**: `docs/skills/xpbd-body-mcp-usage/SKILL.md`。
 
 ## ステータス
 

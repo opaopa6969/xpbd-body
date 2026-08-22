@@ -1,0 +1,25 @@
+{
+  "id": "xpbd-body",
+  "name": "xpbd-body MCP",
+  "description": "VRM 上半身向け XPBD 能動ラグドール物理エンジン。ポーズ→物理追従、逆動力学、物理可能性判定。",
+  "type": "node",
+  "hostname": "xpbd.unlaxer.org",
+  "port": 9204,
+  "host": "192.168.1.50",
+  "runtime": "systemd",
+  "exec_start": "/home/opa/xpbd-body/run.sh",
+  "user": "opa",
+  "auth": "minRole:MEMBER",
+  "health_check": "/healthz",
+  "tags": ["mcp", "xpbd", "physics", "ragdoll", "inverse-dynamics"],
+  "repo_url": "https://github.com/opaopa6969/xpbd-body",
+  "mcp": {
+    "enabled": true,
+    "port": 9204,
+    "path": "/mcp",
+    "namespace": "xpbd",
+    "min_role": "MEMBER",
+    "timeoutMs": 110000,
+    "description": "VRM 上半身 XPBD 物理エンジン"
+  }
+}

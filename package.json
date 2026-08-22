@@ -13,7 +13,9 @@
     "inverse.js"
   ],
   "scripts": {
-    "test": "node test.mjs"
+    "test": "node test.mjs",
+    "mcp:test": "node mcp/test.mjs",
+    "mcp:start": "node mcp/server.mjs"
   },
   "keywords": [
     "xpbd",
@@ -33,5 +35,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/opaopa6969/xpbd-body.git"
+  },
+  "devDependencies": {},
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "zod": "^3.24.0"
   }
 }

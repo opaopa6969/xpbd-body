@@ -56,9 +56,19 @@ const { control, residual, feasible } = estimateControl(rig, observedTrajectory)
 
 ```sh
 node test.mjs     # or: npm test
+npm run mcp:test  # e2e for the MCP server (starts it, runs tools + resources)
 ```
 
 Headless proof of the active ragdoll: stable under stiff motors, joints stay connected, a strong muscle tracks the target, a weak/heavier arm sags under gravity, a shove perturbs then recovers, and it's deterministic. Plus the M4 inverse layer: a **synthetic round trip** (known control → trajectory → estimate → back to the control within 0.003 rad rms), rewind-and-retry, and all three infeasibility prongs.
+
+## MCP
+
+This library is also an **MCP server** (namespace `xpbd`, on [volta](https://github.com/opaopa6969/volta-mcp)). It exposes the forward model and the inverse layer as tools so other MCP services can compose with them.
+
+- **Spec**: `xpbd://spec` (machine-readable capability list). **Guide**: `xpbd://guide`.
+- **Tools**: `simulate` (pose → physics-follow), `estimate_control_start/status/result` (observed → control, job-typed), `check_feasible` (physical feasibility).
+- **Start locally**: `PORT=9204 npm run mcp:start` → `curl http://127.0.0.1:9204/healthz`.
+- **Design**: `docs/mcp/DESIGN.md`. **Status**: `docs/mcp/STATUS.md`. **Skill**: `docs/skills/xpbd-body-mcp-usage/SKILL.md`.
 
 ## Status
 
