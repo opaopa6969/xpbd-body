@@ -1,0 +1,15 @@
+[Unit]
+Description=xpbd-body MCP server (VRM upper-body XPBD physics)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/xpbd-body
+Environment=PORT=9204
+EnvironmentFile=-/home/opa/volta-secrets/xpbd-body.env
+ExecStart=%h/xpbd-body/run.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
