@@ -1,0 +1,129 @@
+{
+  "repo": "xpbd-body",
+  "surveyed_at": "2026-08-22T08:30:00Z",
+  "kind": "library",
+  "summary": "VRM 上半身向けの XPBD 能動ラグドール物理エンジン。目標ポーズを質量・重力・接触つきの物理状態に変換し、観測軌道から制御を逆推定する。依存ゼロ・決定論的・ヘッドレスで Node 上で単体テスト済み。motion-engine の L3(動力学)層。",
+  "decision": "library-serve",
+  "decision_reason": "純粋な JS ライブラリ（HTTP API も CLI も MCP も持たない）だが、エージェントが直接呼べると価値が高い能力を複数持つ: (1) ポーズ→物理追従シミュレーション、(2) 観測軌道→制御推定（逆動力学）、(3) 物理可能性判定（feasibility）。これらは他の MCP サービスと組み合わせて意味が出る（motion-engine のポーズを入力→物理追従→keiko-engine の稽古ループで制御推定）。既存 API が plain-data in/out で副作用なし・決定論的という性質は MCP tool にそのまま写る。常駐プロセスの価値がある: シミュレータの構築（makeUpperBody/makeRig）にはオブジェクト構築コストがあり、estimateControl は数百回の forward simulate を回すため 30 秒超の可能性がある（job 型）。volta カタログに xpbd-body / motion-engine / keiko-engine はまだ未登録なので重複しない。",
+  "existing": {
+    "http_api": false,
+    "cli": false,
+    "mcp": false,
+    "healthz": false,
+    "volta_manifest": false,
+    "hosted_url": null
+  },
+  "proposed_namespace": "xpbd",
+  "capabilities": [
+    {
+      "verb": "目標ポーズを物理追従させる（前向きシミュレーション）",
+      "kind": "tool",
+      "name": "simulate",
+      "io": "{ rig_opts, control_trajectory, dt, steps, substeps? } → { schemaVersion, dt, steps, bones, frames:[{ t, rel, pos, torque }] }",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "inverse.js:simulate()"
+    },
+    {
+      "verb": "観測軌道から制御を逆推定する（analysis by synthesis）",
+      "kind": "tool",
+      "name": "estimate_control",
+      "io": "{ rig_opts, observed_trajectory, opts:{bones?,knots?,method?,iters?,seed?} } → { control, residual, feasible, violations, unique, evals, method }",
+      "side_effect": "read",
+      "long_running": true,
+      "maps_to": "inverse.js:estimateControl()"
+    },
+    {
+      "verb": "観測軌道の物理可能性を判定する",
+      "kind": "tool",
+      "name": "check_feasible",
+      "io": "{ rig_opts, observed_trajectory, simulated?, opts:{tol?,residualTol?} } → { feasible, violations }",
+      "side_effect": "read",
+      "long_running": false,
+      "maps_to": "inverse.js:checkFeasible()"
+    },
+    {
+      "verb": "物理エンジンの能力仕様",
+      "kind": "resource",
+      "name": "spec",
+      "uri": "xpbd://spec"
+    },
+    {
+      "verb": "物理エンジンの使い方",
+      "kind": "resource",
+      "name": "guide",
+      "uri": "xpbd://guide"
+    },
+    {
+      "verb": "逆動力学の理論と限界",
+      "kind": "resource",
+      "name": "inverse-dynamics",
+      "uri": "xpbd://inverse-dynamics"
+    },
+    {
+      "verb": "XPBD 理論から実装へのマッピング",
+      "kind": "resource",
+      "name": "theory-to-model",
+      "uri": "xpbd://theory-to-model"
+    },
+    {
+      "verb": "VRM 上半身の制御・逆動力学を組み合わせる手順",
+      "kind": "skill",
+      "name": "xpbd-body-mcp-usage",
+      "locality": "service"
+    }
+  ],
+  "composition_examples": [
+    "motion-engine のポーズ生成 tool → xpbd__simulate で物理追従 → レンダラー（showcase 等）で描画、のように、目標ポーズを物理的に自然な動きに変換して可視化する",
+    "動画解析（2Dポーズ推定→3Dポーズ変換）→ xpbd__estimate_control で制御推定 → keiko-engine の稽古ループで動きの記述子を得る、のように、観測から制御を逆算する",
+    "xpbd__check_feasible で観測動作の物理可能性を判定 → feasible:false なら violations で原因（ROM/torque/residual）を特定 → リギング調整 or モーション修正にフィードバック"
+  ],
+  "dependencies": [
+    {
+      "repo": "motion-engine",
+      "direction": "depends_on",
+      "capability": "目標ポーズ生成（L2 運動学層）。xpbd-body は motion-engine のポーズ（{bone:[x,y,z]} Euler XYZ）を入力として受け取る",
+      "exists_now": false,
+      "note": "motion-engine は volta カタログに未登録。MCP 化されていない。Phase 2 で協調が必要"
+    },
+    {
+      "repo": "keiko-engine",
+      "direction": "provides_to",
+      "capability": "逆動力学の制御推定結果（control + residual + feasible）。keiko-engine の稽古ループが xpbd-body/inverse の estimateControl を消費する",
+      "exists_now": false,
+      "note": "keiko-engine は volta カタログに未登録。Phase 2 で協調が必要"
+    },
+    {
+      "repo": "sotai-engine",
+      "direction": "depends_on",
+      "capability": "関節可動域（ROM）データ。makeRig の rom オプションに sotai-engine の ROM が入る",
+      "exists_now": false,
+      "note": "sotai-engine は README で言及されているが、存在・MCP 化ともに未確認"
+    }
+  ],
+  "library_serve": {
+    "needed": true,
+    "new_work": [
+      "healthz エンドポイント（GET /healthz → 200）",
+      "PORT 環境変数対応（0.0.0.0 bind）",
+      "MCP サーバ実装（Streamable HTTP /mcp）",
+      "volta.service.json manifest",
+      "systemd user unit または docker 設定",
+      "長時間 tool の job 型化（estimate_control_start / estimate_control_status / estimate_control_result）"
+    ],
+    "runtime": "node",
+    "estimated_effort": "M"
+  },
+  "risks": [
+    "estimateControl は数百回の forward simulate を実行するため、長時間（30 秒超）になる可能性がある。job 型化が必須",
+    "物理パラメータ（mass/compliance/maxTorque）は engine units であり人体に較正されていない。エージェントが結果を解釈する際に注意が必要",
+    "逆問題は ill-posed（unique:false）。複数の制御が同じ動きを生む。結果を「正解」ではなく「1つの推定」として扱う必要がある",
+    "依存ライブラリ（motion-engine, keiko-engine, sotai-engine）がいずれも未 MCP 化のため、end-to-end の組み合わせが現時点ではできない"
+  ],
+  "open_questions": [
+    "motion-engine のポーズ形式（{bone:[x,y,z]} Euler XYZ）を MCP 越しにそのまま渡してよいか、それとも schema を共有すべきか",
+    "estimateControl の job 型化のタイムアウトはどの程度に設定すべきか（3-bone arm で 400ms、full upper body で数秒だが、実データではもっと長くなる可能性）",
+    "sotai-engine は実在するか。存在する場合、ROM データを resource として公開すべきか、それとも xpbd-body 側に埋め込むか",
+    "物理パラメータの較正を誰が・どう行うか（market research でも未較正が課題として挙がっている）"
+  ]
+}

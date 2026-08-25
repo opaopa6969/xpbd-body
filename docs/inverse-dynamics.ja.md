@@ -32,7 +32,7 @@ pure。**副作用なし**: 入口で world を snapshot し、出口で restore
 
 制御フレームは `{ pose: { bone: [x, y, z] }, compliance?: { bone: number } }` —— motion-engine のポーズと同じ Euler XYZ。短い軌道は最後のフレームを保持する。出力フレームは `rel`(ボーンのローカル回転＝レンダラが適用するもの)・`pos`・`torque`(その瞬間に筋肉が引いている力)を持つ。
 
-### `estimateControl(rig, observed, opts)` → `{ control, residual, feasible }` *(issue #3)*
+### `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations, unique }` *(issue #3)*
 
 制御を仮定し、前向きに回し、ズレを見て、仮定を直す。**勾配なし**(シミュレータは接触入りのブラックボックスで、綺麗な微分は無い)、そして**決定論**(seed付きPRNG。`Math.random` はこの repo のどこにも無い)。
 

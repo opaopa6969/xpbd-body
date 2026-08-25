@@ -48,7 +48,7 @@ const { control, residual, feasible } = estimateControl(rig, observedTrajectory)
 
 - `snapshot(world)` / `restore(world, snap)` — plain-data dump/restore of every body **and the motor control state**, so an estimation loop can rewind and try a different control from a bit-identical start.
 - `simulate(rig, controlTrajectory, dt, steps)` → `poseTrajectory` — the forward model. **Side-effect free** (snapshots and restores the world) and **deterministic**. The incremental `world.step(dt)` API is untouched.
-- `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations }` — analysis by synthesis: guess a control, run it forward, look at the gap, fix the guess. Gradient-free (coordinate descent, or a seeded CEM), no `Math.random` anywhere. `feasible: false` names the joint that broke its **range of motion**, blew its **torque ceiling**, or the **residual** that says this body simply cannot do that.
+- `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations, unique }` — analysis by synthesis: guess a control, run it forward, look at the gap, fix the guess. Gradient-free (coordinate descent, or a seeded CEM), no `Math.random` anywhere. `feasible: false` names the joint that broke its **range of motion**, blew its **torque ceiling**, or the **residual** that says this body simply cannot do that.
 
 **The inverse problem is ill-posed** and the API says so (`unique: false`): many controls produce the same visible motion, contact forces are unobservable, a monocular observation has no depth. `estimateControl` returns *one* control — the one the residual and the smoothing regulariser picked — not *the* control. [The limits are documented.](./docs/inverse-dynamics.md)
 
@@ -56,9 +56,19 @@ const { control, residual, feasible } = estimateControl(rig, observedTrajectory)
 
 ```sh
 node test.mjs     # or: npm test
+npm run mcp:test  # e2e for the MCP server (starts it, runs tools + resources)
 ```
 
 Headless proof of the active ragdoll: stable under stiff motors, joints stay connected, a strong muscle tracks the target, a weak/heavier arm sags under gravity, a shove perturbs then recovers, and it's deterministic. Plus the M4 inverse layer: a **synthetic round trip** (known control → trajectory → estimate → back to the control within 0.003 rad rms), rewind-and-retry, and all three infeasibility prongs.
+
+## MCP
+
+This library is also an **MCP server** (namespace `xpbd`, on [volta](https://github.com/opaopa6969/volta-mcp)). It exposes the forward model and the inverse layer as tools so other MCP services can compose with them.
+
+- **Spec**: `xpbd://spec` (machine-readable capability list). **Guide**: `xpbd://guide`.
+- **Tools**: `simulate` (pose → physics-follow), `estimate_control_start/status/result` (observed → control, job-typed), `check_feasible` (physical feasibility).
+- **Start locally**: `PORT=9204 npm run mcp:start` → `curl http://127.0.0.1:9204/healthz`.
+- **Design**: `docs/mcp/DESIGN.md`. **Status**: `docs/mcp/STATUS.md`. **Skill**: `docs/skills/xpbd-body-mcp-usage/SKILL.md`.
 
 ## Status
 
