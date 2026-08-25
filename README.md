@@ -48,7 +48,7 @@ const { control, residual, feasible } = estimateControl(rig, observedTrajectory)
 
 - `snapshot(world)` / `restore(world, snap)` — plain-data dump/restore of every body **and the motor control state**, so an estimation loop can rewind and try a different control from a bit-identical start.
 - `simulate(rig, controlTrajectory, dt, steps)` → `poseTrajectory` — the forward model. **Side-effect free** (snapshots and restores the world) and **deterministic**. The incremental `world.step(dt)` API is untouched.
-- `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations }` — analysis by synthesis: guess a control, run it forward, look at the gap, fix the guess. Gradient-free (coordinate descent, or a seeded CEM), no `Math.random` anywhere. `feasible: false` names the joint that broke its **range of motion**, blew its **torque ceiling**, or the **residual** that says this body simply cannot do that.
+- `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations, unique }` — analysis by synthesis: guess a control, run it forward, look at the gap, fix the guess. Gradient-free (coordinate descent, or a seeded CEM), no `Math.random` anywhere. `feasible: false` names the joint that broke its **range of motion**, blew its **torque ceiling**, or the **residual** that says this body simply cannot do that.
 
 **The inverse problem is ill-posed** and the API says so (`unique: false`): many controls produce the same visible motion, contact forces are unobservable, a monocular observation has no depth. `estimateControl` returns *one* control — the one the residual and the smoothing regulariser picked — not *the* control. [The limits are documented.](./docs/inverse-dynamics.md)
 

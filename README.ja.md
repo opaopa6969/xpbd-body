@@ -48,7 +48,7 @@ const { control, residual, feasible } = estimateControl(rig, observedTrajectory)
 
 - `snapshot(world)` / `restore(world, snap)` ―― 全 body と**モーターの制御状態**を plain data でダンプ/復元。推定ループが巻き戻して、ビット単位で同一の初期状態から別の制御を試せる。
 - `simulate(rig, controlTrajectory, dt, steps)` → `poseTrajectory` ―― 前向きモデル。**副作用なし**(world を snapshot して restore する)・**決定論**。逐次の `world.step(dt)` API はそのまま。
-- `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations }` ―― analysis by synthesis: 制御を仮定し、前向きに回し、ズレを見て、仮定を直す。勾配なし(座標降下 / seed付きCEM)、`Math.random` は不使用。`feasible: false` は、**可動域**を破った関節・**トルク上限**を超えた筋肉・あるいは「**このカラダにはできない**」と言う**残差**を名指しする。
+- `estimateControl(rig, observed, opts)` → `{ control, residual, feasible, violations, unique }` ―― analysis by synthesis: 制御を仮定し、前向きに回し、ズレを見て、仮定を直す。勾配なし(座標降下 / seed付きCEM)、`Math.random` は不使用。`feasible: false` は、**可動域**を破った関節・**トルク上限**を超えた筋肉・あるいは「**このカラダにはできない**」と言う**残差**を名指しする。
 
 **この逆問題は不良設定(ill-posed)**であり、API はそれを明言する(`unique: false`): 同じ見た目の動きを生む制御は複数あり、接触力は観測できず、単眼の観測に奥行きは無い。`estimateControl` が返すのは「*その*制御」ではなく、残差と平滑化正則化が選んだ「*1つの*制御」だ。[限界はドキュメントに書いてある。](./docs/inverse-dynamics.ja.md)
 
