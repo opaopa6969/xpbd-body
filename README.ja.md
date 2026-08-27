@@ -56,6 +56,7 @@ const { control, residual, feasible } = estimateControl(rig, observedTrajectory)
 
 ```sh
 node test.mjs     # or: npm test
+npm run eval      # ノイズ / 遮蔽 / 接触の固定fixtureによる逆推定品質指標
 npm run mcp:test  # MCP サーバの e2e（起動 → tools/resources を叩く）
 ```
 

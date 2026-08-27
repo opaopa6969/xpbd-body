@@ -56,6 +56,7 @@ const { control, residual, feasible } = estimateControl(rig, observedTrajectory)
 
 ```sh
 node test.mjs     # or: npm test
+npm run eval      # fixed noise / occlusion / contact inverse-quality metrics
 npm run mcp:test  # e2e for the MCP server (starts it, runs tools + resources)
 ```
 
